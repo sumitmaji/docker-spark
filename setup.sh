@@ -2,9 +2,10 @@
 
 
 #Install Scala
-tar -xzvf /container/scala-2.10.4.tgz -C /usr/local/
+wget "$REPOSITORY_HOST"/repo/scala-2.10.4.tgz
+tar -xzvf /usr/local/scala-2.10.4.tgz
 mv /usr/local/scala-2.10.4 /usr/local/scala
-rm -rf /container/scala-2.10.4.tgz
+rm -rf /usr/local/scala-2.10.4.tgz
 chown -R hduser:hadoop /usr/local/scala
 
 #Scala Environemtn Setup
@@ -17,11 +18,22 @@ echo 'export PATH=$PATH:$SCALA_HOME/bin' >> /home/hduser/.bashrc
 
 
 #Install Spark
-tar -xzvf /container/spark-1.6.1-bin-hadoop2.4.tgz -C /usr/local/
+wget "$REPOSITORY_HOST"/repo/spark-1.6.1-bin-hadoop2.4.tgz
+tar -xzvf /usr/local/spark-1.6.1-bin-hadoop2.4.tgz
 mv /usr/local/spark-1.6.1-bin-hadoop2.4 /usr/local/spark
-rm -rf /container/spark-1.6.1-bin-hadoop2.4.tgz
+rm -rf /usr/local/spark-1.6.1-bin-hadoop2.4.tgz
 chown -R hduser:hadoop /usr/local/spark
+echo 'export SPARK_HOME=/usr/local/spark' >> /home/hduser/.bashrc
+export SPARK_HOME=/usr/local/spark
+
+#install livy
+wget "$REPOSITORY_HOST"/repo/livy-0.4.0-incubating-bin.zip
+unzip /usr/local/livy-0.4.0-incubating-bin.zip
+mv /usr/local/livy-0.4.0-incubating-bin /usr/local/livy
+rm -rf /usr/local/livy-0.4.0-incubating-bin.zip
+chown -R hduser:hadoop /usr/local/livy
 
 export PATH="$PATH:/usr/local/spark/bin"
 
 echo 'export PATH=$PATH:/usr/local/spark/bin' >> /home/hduser/.bashrc
+echo 'echo "1. Run => /usr/local/livy/bin/livy-server start"' >> /home/hduser/.bashrc
