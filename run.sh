@@ -1,5 +1,5 @@
 #!/bin/bash
 
-docker run -d -p 8998:8998 --name spark -h spark --net cloud.com sumit/spark:latest /etc/bootstrap.sh -d
+docker run -it -e ENABLE_KRB='true' -p 8998:8998 --name spark -h spark.cloud.com --net cloud.com sumit/spark:latest -d
 
 
