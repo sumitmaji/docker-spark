@@ -25,12 +25,20 @@ setEnvVariable() {
  echo 'export PATH=$PATH:$SCALA_HOME/bin' >> /etc/bash.bashrc
  echo 'export PATH=$PATH:/usr/local/spark/bin' >> /etc/bash.bashrc
  echo 'export SPARK_HOME=/usr/local/spark' >> /etc/bash.bashrc
+ echo 'export _JAVA_OPTIONS=-Xmx2048m' >> /etc/bash.bashrc
+
  echo 'echo "1. Run => /usr/local/livy/bin/livy-server start"' >> /etc/bash.bashrc
  cp /usr/local/spark/conf/spark-env.sh.template /usr/local/spark/conf/spark-env.sh
  chmod +x /usr/local/spark/conf/spark-env.sh
-echo "SPARK_HISTORY_OPTS=-Dspark.history.kerberos.enabled=true \
+echo -e "SPARK_HISTORY_OPTS=\"-Dspark.history.kerberos.enabled=true \
 -Dspark.history.kerberos.principal=spark/$fqdn@CLOUD.COM \
--Dspark.history.kerberos.keytab=/etc/security/keytabs/spark.keytab" >> /usr/local/spark/conf/spark-env.sh
+-Dspark.history.kerberos.keytab=/etc/security/keytabs/spark.keytab\"\n \
+export SPARK_LOG_DIR=/var/log/spark\n \
+export SPARK_PID_DIR=/var/run/spark" >> /usr/local/spark/conf/spark-env.sh
+
+mkdir -p /var/log/spark
+mkdir -p /var/run/spark
+
  cp /usr/local/livy/conf/livy.conf.template /usr/local/livy/conf/livy.conf
 echo "livy.server.auth.kerberos.keytab /etc/security/keytabs/livy.keytab
 livy.server.auth.kerberos.principal HTTP/_HOST@CLOUD.COM
@@ -61,6 +69,14 @@ initializePrincipal() {
  mv livy.keytab /etc/security/keytabs
  chmod 400 /etc/security/keytabs/livy.keytab
  chown root:hadoop /etc/security/keytabs/livy.keytab
+
+kinit -k -t /etc/security/keytabs/spark.keytab spark/$(hostname -f)
+su - root -c "$HADOOP_INSTALL/bin/hdfs dfs -mkdir -p /user/spark"
+su - root -c "$HADOOP_INSTALL/bin/hdfs dfs -chown spark:spark /user/spark"
+su - root -c "$HADOOP_INSTALL/bin/hdfs dfs -chown spark:spark /user/spark"
+su - root -c "$HADOOP_INSTALL/bin/hdfs dfs -mkdir /spark-history"
+su - root -c "$HADOOP_INSTALL/bin/hdfs dfs -chown -R spark:hadoop /spark-history"
+su - root -c "$HADOOP_INSTALL/bin/hdfs dfs -chmod -R 777 /spark-history" 
 
 }
 
