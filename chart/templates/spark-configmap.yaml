@@ -1,0 +1,980 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ template "spark.fullname" . }}
+  labels:
+    app: {{ template "spark.name" . }}
+    chart: {{ .Chart.Name }}-{{ .Chart.Version | replace "+" "_" }}
+    release: {{ .Release.Name }}
+    heritage: {{ .Release.Service }}
+data:
+    config: |
+      #MASTER=hdfs-master will set hostname from helm
+      DOMAIN_NAME=default.svc.cloud.uat
+      HADOOP_INSTALL=/usr/local/hadoop
+      KEY_PWD=sumit@1234
+      ENABLE_HADOOP_SSL=false
+      ENABLE_KERBEROS=true
+      REPOSITORY_HOST=http://192.168.1.5:8181
+      HADOOP_VERSION=hadoop-3.1.0
+      HADOOP_CHART: hadoop-hadoop
+
+    ssl-client.xml: |
+      <?xml version="1.0" encoding="UTF-8"?>
+      <?xml-stylesheet type="text/xsl" href="configuration.xsl"?>
+      <configuration>
+        <property>
+          <name>ssl.client.truststore.location</name>
+          <value>/usr/local/hadoop/etc/hadoop/certs/DOMAIN_JKS</value>
+          <description>Truststore to be used by clients like distcp. Must be  specified.  </description>
+        </property>
+        <property>
+          <name>ssl.client.truststore.password</name>
+          <value>JKS_KEY_PASSWORD</value>
+          <description>Optional. Default value is "".  </description>
+        </property>
+        <property>
+          <name>ssl.client.truststore.type</name>
+          <value>jks</value>
+          <description>Optional. The keystore file format, default value is "jks".  </description>
+        </property>
+        <property>
+          <name>ssl.client.truststore.reload.interval</name>
+          <value>10000</value>
+          <description>Truststore reload check interval, in milliseconds.  Default value is 10000 (10 seconds).  </description>
+        </property>
+        <property>
+          <name>ssl.client.keystore.location</name>
+          <value>/usr/local/hadoop/etc/hadoop/certs/DOMAIN_JKS</value>
+          <description>Keystore to be used by clients like distcp. Must be  specified.  </description>
+        </property>
+        <property>
+          <name>ssl.client.keystore.password</name>
+          <value>JKS_KEY_PASSWORD</value>
+          <description>Optional. Default value is "".  </description>
+        </property>
+        <property>
+          <name>ssl.client.keystore.keypassword</name>
+          <value>JKS_KEY_PASSWORD</value>
+          <description>Optional. Default value is "".  </description>
+        </property>
+        <property>
+          <name>ssl.client.keystore.type</name>
+          <value>jks</value>
+          <description>Optional. The keystore file format, default value is "jks".  </description>
+        </property>
+      </configuration>
+
+    ssl-server.xml: |
+      <?xml version="1.0" encoding="UTF-8"?>
+      <?xml-stylesheet type="text/xsl" href="configuration.xsl"?>
+      <configuration>
+        <property>
+          <name>ssl.server.truststore.location</name>
+          <value>/usr/local/hadoop/etc/hadoop/certs/DOMAIN_JKS</value>
+          <description>Truststore to be used by NN and DN. Must be specified.  </description>
+        </property>
+        <property>
+          <name>ssl.server.truststore.password</name>
+          <value>JKS_KEY_PASSWORD</value>
+          <description>Optional. Default value is "".  </description>
+        </property>
+        <property>
+          <name>ssl.server.truststore.type</name>
+          <value>jks</value>
+          <description>Optional. The keystore file format, default value is "jks".  </description>
+        </property>
+        <property>
+          <name>ssl.server.truststore.reload.interval</name>
+          <value>10000</value>
+          <description>Truststore reload check interval, in milliseconds.  Default value is 10000 (10 seconds).  </description>
+        </property>
+        <property>
+          <name>ssl.server.keystore.location</name>
+          <value>/usr/local/hadoop/etc/hadoop/certs/DOMAIN_JKS</value>
+          <description>Keystore to be used by NN and DN. Must be specified.  </description>
+        </property>
+        <property>
+          <name>ssl.server.keystore.password</name>
+          <value>JKS_KEY_PASSWORD</value>
+          <description>Must be specified.  </description>
+        </property>
+        <property>
+          <name>ssl.server.keystore.keypassword</name>
+          <value>JKS_KEY_PASSWORD</value>
+          <description>Must be specified.  </description>
+        </property>
+        <property>
+          <name>ssl.server.keystore.type</name>
+          <value>jks</value>
+          <description>Optional. The keystore file format, default value is "jks".  </description>
+        </property>
+      </configuration>
+
+    bootstrap.sh: |
+      #!/bin/bash
+
+      [[ "TRACE" ]] && set -x
+
+      # Directory to find config artifacts
+      CONFIG_DIR="/tmp/spark-config"
+
+      mkdir -p /root/hdfs/sparknode
+      chwon -R root:hadoop /root/hdfs
+
+      source ${CONFIG_DIR}/config
+
+      : ${HADOOP_PREFIX:=/usr/local/hadoop}
+      : ${DOMAIN_NAME:=cloud.com}
+      : ${DOMAIN_REALM:=$DOMAIN_NAME}
+      : ${ENABLE_KERBEROS:=false}
+      : ${REALM:=$(echo $DOMAIN_NAME | tr 'a-z' 'A-Z')}
+      : ${HADOOP_INSTALL:=/usr/local/hadoop}
+      : ${SPARK_HOME:=/usr/local/spark}
+      # Copy config files from volume mount
+
+      for f in slaves core-site.xml hdfs-site.xml mapred-site.xml yarn-site.xml httpfs-site.xml; do
+        if [[ -e ${CONFIG_DIR}/$f ]]; then
+          cp ${CONFIG_DIR}/$f $HADOOP_PREFIX/etc/hadoop/$f
+        else
+          echo "ERROR: Could not find $f in $CONFIG_DIR"
+          exit 1
+        fi
+      done
+
+      cp ${CONFIG_DIR}/spark-defaults.conf $SPARK_HOME/conf/spark-defaults.conf
+
+      startSsh() {
+        echo -e "Starting SSHD service"
+        /usr/sbin/sshd
+      }
+
+      setEnvVariable() {
+        fqdn=$(hostname -f)
+        export SCALA_HOME="/usr/local/scala"
+        export PATH="$PATH:$SCALA_HOME/bin"
+        export PATH="$PATH:/usr/local/spark/bin"
+        export SPARK_HOME=/usr/local/spark
+        export HADOOP_CONF_DIR=$HADOOP_PREFIX/etc/hadoop
+        export YARN_CONF_DIR=$HADOOP_PREFIX/etc/hadoop
+
+        echo 'export SCALA_HOME=/usr/local/scala' >>/etc/bash.bashrc
+        echo 'export PATH=$PATH:$SCALA_HOME/bin' >>/etc/bash.bashrc
+        echo 'export PATH=$PATH:/usr/local/spark/bin' >>/etc/bash.bashrc
+        echo 'export SPARK_HOME=/usr/local/spark' >>/etc/bash.bashrc
+        echo 'export _JAVA_OPTIONS=-Xmx2048m' >>/etc/bash.bashrc
+        #echo 'export HADOOP_CONF_DIR="$HADOOP_PREFIX"/etc/hadoop' >>/etc/bash.bashrc
+        echo 'export YARN_CONF_DIR=$HADOOP_INSTALL/etc/hadoop' >>/etc/bash.bashrc
+
+        echo 'export JAVA_HOME=/usr/local/jdk' >>/etc/bash.bashrc
+        echo 'export PATH=$PATH:$JAVA_HOME/bin' >>/etc/bash.bashrc
+        echo 'export HADOOP_INSTALL=/usr/local/hadoop' >>/etc/bash.bashrc
+        echo 'export PATH=$PATH:$HADOOP_INSTALL/bin' >>/etc/bash.bashrc
+        echo 'export PATH=$PATH:$HADOOP_INSTALL/sbin' >>/etc/bash.bashrc
+        echo 'export HADOOP_MAPRED_HOME=$HADOOP_INSTALL' >>/etc/bash.bashrc
+        echo 'export HADOOP_COMMON_HOME=$HADOOP_INSTALL' >>/etc/bash.bashrc
+        echo 'export HADOOP_HDFS_HOME=$HADOOP_INSTALL' >>/etc/bash.bashrc
+        echo 'export YARN_HOME=$HADOOP_INSTALL' >>/etc/bash.bashrc
+        echo 'export HADOOP_COMMON_LIB_NATIVE_DIR=$HADOOP_INSTALL/lib/native' >>/etc/bash.bashrc
+        echo 'export HADOOP_OPTS="-Djava.library.path=$HADOOP_INSTALL/lib/native"' >>/etc/bash.bashrc
+        echo 'export HADOOP_CONF_DIR=/usr/local/hadoop/etc/hadoop' >>/etc/bash.bashrc
+        echo 'export LD_LIBRARY_PATH=/usr/local/lib:$HADOOP_INSTALL/lib/native:$LD_LIBRARY_PATH' >>/etc/bash.bashrc
+
+        echo 'echo "1. Run => /usr/local/livy/bin/livy-server start"' >>/etc/bash.bashrc
+        cp $SPARK_HOME/conf/spark-env.sh.template $SPARK_HOME/conf/spark-env.sh
+        chmod +x $SPARK_HOME/conf/spark-env.sh
+
+        echo -e "export SPARK_LOG_DIR=/var/log/spark\n \
+        export SPARK_PID_DIR=/var/run/spark" >>$SPARK_HOME/conf/spark-env.sh
+
+        cp /usr/local/livy/conf/livy.conf.template /usr/local/livy/conf/livy.conf
+
+        if [ "$ENABLE_KERBEROS" == 'true' ]; then
+          echo -e "SPARK_HISTORY_OPTS=\"-Dspark.history.kerberos.enabled=true \
+      -Dspark.history.kerberos.principal=spark/$(hostname -f)@$REALM \
+      -Dspark.history.kerberos.keytab=/etc/security/keytabs/spark.keytab\"\n" >>$SPARK_HOME/conf/spark-env.sh
+
+          echo "livy.server.auth.kerberos.keytab /etc/security/keytabs/livy.keytab
+      livy.server.auth.kerberos.principal HTTP/_HOST@$REALM
+      livy.server.auth.type kerberos
+      livy.server.launch.kerberos.keytab /etc/security/keytabs/livy.keytab
+      livy.server.launch.kerberos.principal livy/_HOST@$REALM" >>/usr/local/livy/conf/livy.conf
+          kerberizeNameNodeSerice
+          kerberizeSecondaryNamenodeService
+          kerberizeDataNodeService
+          kerberizeYarnService
+          kerberizeHttpfsService
+          sedFile /usr/local/hadoop/etc/hadoop/core-site.xml
+          sedFile /usr/local/hadoop/etc/hadoop/hdfs-site.xml
+          sedFile /usr/local/hadoop/etc/hadoop/mapred-site.xml
+          sedFile /usr/local/hadoop/etc/hadoop/yarn-site.xml
+          sedFile /usr/local/hadoop/etc/hadoop/httpfs-site.xml
+
+        fi
+
+        mkdir -p /var/log/spark
+        mkdir -p /var/run/spark
+        chown -R root:hadoop /var/log/spark
+        chown -R root:hadoop /var/run/spark
+      }
+
+      kerberizeHttpfsService() {
+        /bin/bash /tmp/spark-config/kerberizeHttpfs.sh /usr/local/hadoop/etc/hadoop/httpfs-site.xml
+      }
+
+      enableSslService() {
+        /bin/bash /tmp/spark-config/enableSSL.sh /usr/local/hadoop/etc/hadoop/core-site.xml
+        /bin/bash /tmp/spark-config/enableSSL.sh /usr/local/hadoop/etc/hadoop/hdfs-site.xml
+        /bin/bash /tmp/spark-config/enableSSL.sh /usr/local/hadoop/etc/hadoop/mapred-site.xml
+        #On secure datanodes, user to run the datanode as after dropping privileges
+      }
+
+      kerberizeNameNodeSerice() {
+
+        /bin/bash /tmp/spark-config/kerberizeNamenode.sh /usr/local/hadoop/etc/hadoop/core-site.xml
+        /bin/bash /tmp/spark-config/kerberizeNamenode.sh /usr/local/hadoop/etc/hadoop/hdfs-site.xml
+      }
+
+      kerberizeSecondaryNamenodeService() {
+        /bin/bash /tmp/spark-config/kerberizeSecondarynode.sh /usr/local/hadoop/etc/hadoop/hdfs-site.xml
+      }
+
+      kerberizeDataNodeService() {
+        /bin/bash /tmp/spark-config/kerberizeDatanode.sh /usr/local/hadoop/etc/hadoop/hdfs-site.xml
+      }
+
+      kerberizeYarnService() {
+        /bin/bash /tmp/spark-config/kerberizeYarn.sh /usr/local/hadoop/etc/hadoop/mapred-site.xml
+        /bin/bash /tmp/spark-config/kerberizeYarn.sh /usr/local/hadoop/etc/hadoop/yarn-site.xml
+        echo 'yarn.nodemanager.linux-container-executor.group=hadoop
+            banned.users=bin
+            min.user.id=500
+            allowed.system.users=hduser' >$HADOOP_INSTALL/etc/hadoop/container-executor.cfg
+        chmod 050 /usr/local/hadoop/bin/container-executor
+        chmod u+s /usr/local/hadoop/bin/container-executor
+        chmod g+s /usr/local/hadoop/bin/container-executor
+        ls -ltr "$HADOOP_INSTALL"/bin/
+        su - root -c "$HADOOP_INSTALL/bin/container-executor"
+      }
+
+      sedFile() {
+        filename=$1
+        PRIV1=1006
+        PRIV2=1019
+        if [ "$ENABLE_HADOOP_SSL" == 'true' ]; then
+          PRIV1=50020
+          PRIV2=50010
+        fi
+        #sed -i "s/\$NAME_SERVER/$NAME_SERVER/" $filename
+        #sed -i "s/\$HDFS_MASTER/$HDFS_MASTER/" $filename value is read directly from helm
+        sed -i "s/\$PRIV1/$PRIV1/" $filename
+        sed -i "s/\$PRIV2/$PRIV2/" $filename
+        sed -i "s/\$REALM/$REALM/" $filename
+        #sed -i "s/_HOST/$(hostname -f)/g" $filename
+        #sed -i "s/HOSTNAME/$HDFS_MASTER/" $filename
+        sed -i "s/DOMAIN_JKS/$keyfile/" $filename
+        sed -i "s/JKS_KEY_PASSWORD/$KEY_PWD/" $filename
+      }
+
+      initializePrincipal() {
+        kadmin -p root/admin -w admin -q "addprinc -randkey spark/$(hostname -f)@$REALM"
+
+        kadmin -p root/admin -w admin -q "xst -k spark.keytab spark/$(hostname -f)@$REALM"
+
+        kadmin -p root/admin -w admin -q "addprinc -randkey livy/$(hostname -f)@$REALM"
+        kadmin -p root/admin -w admin -q "addprinc -randkey HTTP/$(hostname -f)@$REALM"
+        kadmin -p root/admin -w admin -q "xst -k livy.keytab livy/$(hostname -f)@$REALM HTTP/$(hostname -f)@$REALM"
+
+        mkdir -p /etc/security/keytabs
+        mv spark.keytab /etc/security/keytabs
+        chmod 400 /etc/security/keytabs/spark.keytab
+        chown root:hadoop /etc/security/keytabs/spark.keytab
+        mv livy.keytab /etc/security/keytabs
+        chmod 400 /etc/security/keytabs/livy.keytab
+        chown root:hadoop /etc/security/keytabs/livy.keytab
+
+      }
+
+      startLivyServer() {
+        /usr/local/livy/bin/livy-server start
+      }
+
+      deamon() {
+        while true; do sleep 1000; done
+      }
+
+      bashPrompt() {
+        /bin/bash
+      }
+
+      sshPromt() {
+        /usr/sbin/sshd -D
+      }
+
+      initialize() {
+        #startLivyServer
+        su - root -c "$HADOOP_INSTALL/etc/hadoop/hadoop-env.sh"
+        kinit -k -t /etc/security/keytabs/spark.keytab spark/$(hostname -f)
+        su - root -c "$HADOOP_INSTALL/bin/hdfs dfs -mkdir -p /user/spark"
+        su - root -c "$HADOOP_INSTALL/bin/hdfs dfs -chown spark:spark /user/spark"
+        su - root -c "$HADOOP_INSTALL/bin/hdfs dfs -chown spark:spark /user/spark"
+        su - root -c "$HADOOP_INSTALL/bin/hdfs dfs -mkdir /spark-history"
+        su - root -c "$HADOOP_INSTALL/bin/hdfs dfs -chown -R spark:hadoop /spark-history"
+        su - root -c "$HADOOP_INSTALL/bin/hdfs dfs -chmod -R 777 /spark-history"
+      }
+
+      main() {
+        if [ ! -f /spark_initialized ]; then
+          sed -i '/ENABLE_KUBERNETES/d' /config
+          /utility/ldap/bootstrap.sh
+          startSsh
+          initializePrincipal
+          #changeOwner
+          setEnvVariable
+          initialize
+          touch /spark_initialized
+        else
+          startSsh
+          initialize
+        fi
+        if [[ $1 == "-d" ]]; then
+          deamon
+        fi
+      }
+
+      [[ "$0" == "$BASH_SOURCE" ]] && main "$@"
+
+    enableSSL.sh: |
+      #!/bin/bash
+
+      [[ "TRACE" ]] && set -x
+
+      source /tmp/spark-config/config
+
+      filename=$1
+
+      if [[ $filename == *"hdfs-site.xml"* ]]; then
+        sed -i 's/<\/configuration>/<!-- Enable SSL--> \
+          <property> \
+               <name>dfs.http.policy<\/name> \
+               <value>HTTPS_ONLY<\/value> \
+          <\/property> \
+          <property> \
+               <name>dfs.data.transfer.protection<\/name> \
+               <value>authentication<\/value> \
+           <\/property> \
+           <property> \
+               <name>dfs.encrypt.data.transfer<\/name> \
+               <value>true<\/value> \
+           <\/property> \
+           <property> \
+               <name>dfs.client.https.need-auth<\/name> \
+               <value>false<\/value> \
+           <\/property> \
+           <property> \
+               <name>dfs.datanode.https.address<\/name> \
+               <value>0.0.0.0:50475<\/value> \
+          <\/property> \
+      <!-- End --> \
+      <\/configuration>/g' $filename
+      elif [[ $filename == *"mapred-site.xml"* ]]; then
+        sed -i 's/<\/configuration>/<!-- Enable SSL--> \
+          <property> \
+               <name>mapreduce.shuffle.ssl.enabled<\/name> \
+               <value>true<\/value> \
+           <\/property> \
+      <!-- End --> \
+      <\/configuration>/g' $filename
+      elif [[ $filename == *"core-site.xml"* ]]; then
+        sed -i 's/<\/configuration>/<!-- Enable SSL--> \
+          <property> \
+              <name>hadoop.ssl.require.client.cert<\/name> \
+              <value>false<\/value> \
+          <\/property> \
+      <!-- Inorder to skip hostname check from the certificate, keep it ALLOW_ALL--> \
+          <property> \
+              <name>hadoop.ssl.hostname.verifier<\/name> \
+              <value>DEFAULT<\/value> \
+          <\/property> \
+          <property> \
+              <name>hadoop.ssl.keystores.factory.class<\/name> \
+              <value>org.apache.hadoop.security.ssl.FileBasedKeyStoresFactory<\/value> \
+          <\/property> \
+          <property> \
+              <name>hadoop.ssl.server.conf<\/name> \
+              <value>ssl-server.xml<\/value> \
+          <\/property> \
+          <property> \
+              <name>hadoop.ssl.client.conf<\/name> \
+              <value>ssl-client.xml<\/value> \
+          <\/property> \
+          <property> \
+              <name>hadoop.rpc.protection<\/name> \
+              <value>privacy<\/value> \
+          <\/property> \
+      <!-- End --> \
+      <\/configuration>/g' $filename
+      fi
+
+    kerberizeDatanode.sh: |
+      #!/bin/bash
+
+      [[ "TRACE" ]] && set -x
+
+      source /tmp/spark-config/config
+
+      filename=$1
+
+      if [[ $filename == *"hdfs-site.xml"* ]]; then
+        sed -i 's/<\/configuration>/<!-- Enable Kerberos authentication for DataNode--> \
+      <!-- DataNode security config --> \
+          <property> \
+               <name>dfs.datanode.data.dir.perm<\/name> \
+               <value>750<\/value> \
+          <\/property> \
+          <property> \
+               <name>dfs.datanode.http.address<\/name> \
+               <value>0.0.0.0:$PRIV1<\/value> \
+          <\/property> \
+          <property> \
+               <name>dfs.datanode.keytab.file<\/name> \
+               <value>\/etc\/security\/keytabs\/hduser.keytab<\/value> \
+          <\/property> \
+          <property> \
+               <name>dfs.datanode.kerberos.principal<\/name> \
+               <value>hduser\/_HOST@$REALM<\/value> \
+          <\/property> \
+          <property> \
+               <name>dfs.datanode.ipc.address<\/name> \
+               <value>0.0.0.0:8010<\/value> \
+          <\/property> \
+          <property> \
+               <name>dfs.datanode.address<\/name> \
+               <value>0.0.0.0:$PRIV2<\/value> \
+          <\/property> \
+          <property> \
+               <name>dfs.permissions.supergroup<\/name> \
+               <value>hadoop<\/value> \
+               <description>The name of the group of super-users.<\/description> \
+          <\/property> \
+      <!-- End --> \
+      <\/configuration>/g' $filename
+      fi
+
+    kerberizeHttpfs.sh: |
+      #!/bin/bash
+
+      [[ "TRACE" ]] && set -x
+
+      source /tmp/spark-config/config
+
+      filename=$1
+
+      if [[ $filename == *"httpfs-site.xml"* ]]; then
+        sed -i 's/<\/configuration>/<!-- Enable Kerberos authentication for httfs--> \
+      <property> \
+        <name>httpfs.authentication.type<\/name> \
+        <value>kerberos<\/value> \
+      <\/property> \
+      <property> \
+        <name>httpfs.hadoop.authentication.type<\/name> \
+        <value>kerberos<\/value> \
+      <\/property> \
+      <property> \
+        <name>httpfs.authentication.kerberos.principal<\/name> \
+        <!-- value>HTTP\/$HDFS_MASTER@$REALM<\/value --> \
+        <value>HTTP\/$HADOOP_CHART-hdfs-nn.{{ .Release.Namespace }}.svc.cloud.uat@$REALM<\/value> \
+      <\/property> \
+      <property> \
+        <name>httpfs.authentication.kerberos.keytab<\/name> \
+        <value>\/etc\/security\/keytabs\/hduser.keytab<\/value> \
+      <\/property> \
+      <property> \
+        <name>httpfs.hadoop.authentication.kerberos.principal<\/name> \
+        <!-- value>hduser\/$HDFS_MASTER@$REALM<\/value --> \
+        <value>hduser\/$HADOOP_CHART-hdfs-nn.{{ .Release.Namespace }}.svc.cloud.uat@$REALM<\/value> \
+      <\/property> \
+      <property> \
+        <name>httpfs.hadoop.authentication.kerberos.keytab<\/name> \
+        <value>\/etc\/security\/keytabs\/hduser.keytab<\/value> \
+      <\/property> \
+      <!-- End --> \
+      <\/configuration>/g' $filename
+      fi
+
+    kerberizeNamenode.sh: |
+      #!/bin/bash
+
+      [[ "TRACE" ]] && set -x
+
+      source /tmp/spark-config/config
+
+      filename=$1
+
+      if [[ $filename == *"core-site.xml"* ]]; then
+        sed -i 's/<\/configuration>/<!-- Enable Kerberos authentication--> \
+          <property> \
+               <name>hadoop.security.authentication<\/name> \
+               <value>kerberos<\/value> \
+               <description> Set the authentication for the cluster. \
+               Valid values are,  simple or kerberos.<\/description> \
+          <\/property> \
+          <property> \
+               <name>hadoop.security.authorization<\/name> \
+               <value>true<\/value> \
+               <description>Enable authorization for different protocols.<\/description> \
+          <\/property> \
+      <!-- End --> \
+      <\/configuration>/g' $filename
+      elif [[ $filename == *"hdfs-site.xml"* ]]; then
+        sed -i 's/<\/configuration>/<!-- Enable Kerberos authentication for Namenode--> \
+      <!-- General HDFS security config --> \
+          <property> \
+               <name>dfs.block.access.token.enable<\/name> \
+               <value>true<\/value> \
+               <description> If \"true\", access tokens are used as capabilities \
+                  for accessing datanodes. If \"false\", no access tokens are checked on \
+                  accessing datanodes. <\/description> \
+          <\/property> \
+      <!-- NameNode security config --> \
+          <property> \
+               <name>dfs.namenode.keytab.file<\/name> \
+               <value>\/etc\/security\/keytabs\/hduser.keytab<\/value> <!-- path to the HDFS keytab --> \
+          <\/property> \
+          <property> \
+               <name>dfs.namenode.kerberos.principal<\/name> \
+                <value>hduser\/hadoop-hadoop-hdfs-nn-0.hadoop-hadoop-hdfs-nn.default.svc.cloud.uat@$REALM<\/value> \
+          <\/property> \
+          <property> \
+               <name>dfs.namenode.kerberos.internal.spnego.principal<\/name> \
+               <value>HTTP\/hadoop-hadoop-hdfs-nn-0.hadoop-hadoop-hdfs-nn.default.svc.cloud.uat@$REALM<\/value> \
+          <\/property> \
+      <!-- Web Authentication config --> \
+          <property> \
+               <name>dfs.web.authentication.kerberos.principal<\/name> \
+               <value>HTTP\/hadoop-hadoop-hdfs-nn-0.hadoop-hadoop-hdfs-nn.default.svc.cloud.uat@$REALM<\/value> \
+          <\/property> \
+          <property> \
+               <name>dfs.web.authentication.kerberos.keytab<\/name> \
+               <value>\/etc\/security\/keytabs\/hduser.keytab<\/value> \
+               <description>The Kerberos keytab file with the credentials for the HTTP \
+               Kerberos principal used by Hadoop-Auth in the HTTP endpoint. \
+               <\/description> \
+          <\/property> \
+      <!-- End --> \
+      <\/configuration>/g' $filename
+      fi
+
+    kerberizeSecondarynode.sh: |
+      #!/bin/bash
+
+      [[ "TRACE" ]] && set -x
+
+      source /tmp/spark-config/config
+
+      filename=$1
+
+      if [[ $filename == *"hdfs-site.xml"* ]]; then
+        sed -i 's/<\/configuration>/<!-- Enable Kerberos authentication for SecondaryNameNode--> \
+      <!-- Secondary NameNode security config --> \
+          <property> \
+               <name>dfs.secondary.namenode.kerberos.principal<\/name> \
+               <value>hduser\/_HOST@$REALM<\/value> \
+               <description>Kerberos principal name for the secondary NameNode. \
+               <\/description> \
+          <\/property> \
+          <property> \
+               <name>dfs.secondary.namenode.keytab.file<\/name> \
+               <value>\/etc\/security\/keytabs\/hduser.keytab<\/value> \
+               <description> \
+               Combined keytab file containing the namenode service and host \
+               principals. \
+               <\/description> \
+          <\/property> \
+          <property> \
+      <!--cluster variant --> \
+               <name>dfs.secondary.http.address<\/name> \
+               <!-- value>$HDFS_MASTER:50090<\/value --> \
+               <value>$HADOOP_CHART-hdfs-nn.{{ .Release.Namespace }}.svc.cloud.uat:50090<\/value> \
+               <description>Address of secondary namenode web server<\/description> \
+          <\/property> \
+          <property> \
+               <name>dfs.secondary.https.port<\/name> \
+               <value>50490<\/value> \
+               <description>The https port where secondary-namenode binds<\/description> \
+          <\/property> \
+          <property> \
+               <name>dfs.secondary.namenode.kerberos.internal.spnego.principal<\/name> \
+               <value>$\{dfs.web.authentication.kerberos.principal\}<\/value> \
+           <\/property> \
+           <property> \
+               <name>dfs.secondary.namenode.kerberos.http.principal<\/name> \
+                <value>HTTP\/_HOST@$REALM<\/value> \
+           <\/property> \
+      <!-- End --> \
+      <\/configuration>/g' $filename
+      fi
+
+    kerberizeYarn.sh: |
+      #!/bin/bash
+
+      [[ "TRACE" ]] && set -x
+
+      source /tmp/spark-config/config
+
+      filename=$1
+
+      if [[ $filename == *"yarn-site.xml"* ]]; then
+        sed -i 's/<\/configuration>/<!-- Enable Kerberos authentication for Yarn--> \
+      <!-- yarn process --> \
+          <property> \
+               <name>yarn.nodemanager.container-executor.class<\/name> \
+               <value>org.apache.hadoop.yarn.server.nodemanager.LinuxContainerExecutor<\/value> \
+          <\/property> \
+          <property> \
+               <name>yarn.nodemanager.linux-container-executor.group<\/name> \
+               <value>hduser<\/value> \
+          <\/property> \
+      <!-- resource manager secure configuration info --> \
+          <property> \
+               <name>yarn.resourcemanager.principal<\/name> \
+               <value>hduser\/hadoop-hadoop-yarn-rm-0.hadoop-hadoop-yarn-rm.default.svc.cloud.uat@$REALM<\/value> \
+          <\/property> \
+          <property> \
+               <name>yarn.resourcemanager.keytab<\/name> \
+               <value>\/etc\/security\/keytabs\/hduser.keytab<\/value> \
+          <\/property> \
+      <!-- NodeManager --> \
+          <property> \
+               <name>yarn.nodemanager.principal<\/name> \
+               <value>hduser\/_HOST@$REALM<\/value> \
+          <\/property> \
+          <property> \
+               <name>yarn.nodemanager.keytab<\/name> \
+               <value>\/etc\/security\/keytabs\/hduser.keytab<\/value> \
+          <\/property> \
+          <property> \
+               <name>yarn.web-proxy.principal<\/name> \
+               <value>hduser\/hadoop-hadoop-yarn-rm-0.hadoop-hadoop-yarn-rm.default.svc.cloud.uat@$REALM<\/value> \
+          <\/property> \
+          <property> \
+               <name>yarn.web-proxy.keytab<\/name> \
+               <value>\/etc\/security\/keytabs\/hduser.keytab<\/value> \
+          <\/property> \
+          <property> \
+               <name>yarn.web-proxy.address<\/name> \
+               <value>hadoop-hadoop-yarn-rm-0.hadoop-hadoop-yarn-rm.default.svc.cloud.uat:8090<\/value> \
+          <\/property> \
+      <!-- End --> \
+      <\/configuration>/g' $filename
+      elif [[ $filename == *"mapred-site.xml"* ]]; then
+        sed -i 's/<\/configuration>/<!-- Enable Kerberos authentication for Yarn--> \
+          <property> \
+               <name>mapreduce.jobhistory.keytab<\/name> \
+               <value>\/etc\/security\/keytabs\/hduser.keytab<\/value> \
+          <\/property> \
+          <property> \
+               <name>mapreduce.jobhistory.principal<\/name> \
+               <value>hduser\/_HOST@$REALM<\/value> \
+          <\/property> \
+      <!-- End --> \
+      <\/configuration>/g' $filename
+      fi
+
+    core-site.xml: |
+      <?xml version="1.0"?>
+      <?xml-stylesheet type="text/xsl" href="configuration.xsl"?>
+      <configuration>
+        <property>
+          <name>fs.defaultFS</name>
+          <!-- value>hdfs://$HADOOP_CHART-hdfs-nn:9000/</value -->
+          <value>hdfs://hadoop-hadoop-hdfs-nn:9000/</value>
+          <description>NameNode URI</description>
+        </property>
+        <property>
+          <name>hadoop.tmp.dir</name>
+          <value>/app/hadoop/tmp</value>
+          <description>A base for other temporary directories.</description>
+        </property>
+      </configuration>
+
+    hdfs-site.xml: |
+      <?xml version="1.0"?>
+      <?xml-stylesheet type="text/xsl" href="configuration.xsl"?>
+      <configuration>
+        <property>
+          <name>dfs.datanode.use.datanode.hostname</name>
+          <value>false</value>
+        </property>
+
+        <property>
+          <name>dfs.client.use.datanode.hostname</name>
+          <value>false</value>
+        </property>
+
+        <property>
+          <name>dfs.replication</name>
+            <value>1</value>
+        </property>
+        <property>
+          <name>dfs.http.address</name>
+          <value>0.0.0.0:50070</value>
+          <description>
+            The address and the base port where the dfs namenode web ui will listen on.
+            If the port is 0 then the server will start on a free port.
+          </description>
+        </property>
+
+        <property>
+          <name>dfs.datanode.data.dir</name>
+          <value>file:///root/hdfs/datanode</value>
+          <description>DataNode directory</description>
+        </property>
+
+        <property>
+          <name>dfs.namenode.name.dir</name>
+          <value>file:///root/hdfs/namenode</value>
+          <description>NameNode directory for namespace and transaction logs storage.</description>
+        </property>
+
+        <property>
+          <name>dfs.namenode.datanode.registration.ip-hostname-check</name>
+          <value>false</value>
+        </property>
+
+        <!-- Bind to all interfaces -->
+        <property>
+          <name>dfs.namenode.rpc-bind-host</name>
+          <value>0.0.0.0</value>
+        </property>
+        <property>
+          <name>dfs.namenode.servicerpc-bind-host</name>
+          <value>0.0.0.0</value>
+        </property>
+        <!-- /Bind to all interfaces -->
+        <property>
+          <name>dfs.safemode.threshold.pct</name>
+          <value>0</value>
+        </property>
+        <property>
+          <name>dfs.datanode.max.xcievers</name>
+          <value>8192</value>
+        </property>
+        <property>
+          <name>dfs.webhdfs.enabled</name>
+          <value>true</value>
+        </property>
+
+      </configuration>
+
+    mapred-site.xml: |
+      <?xml version="1.0"?>
+      <?xml-stylesheet type="text/xsl" href="configuration.xsl"?>
+
+      <configuration>
+        <property>
+          <name>mapreduce.framework.name</name>
+          <value>yarn</value>
+        </property>
+        <property>
+          <name>mapreduce.jobhistory.address</name>
+          <!-- value>$HADOOP_CHART-yarn-rm-0.$HADOOP_CHART-yarn-rm.{{ .Release.Namespace }}.svc.cloud.uat:10020</value -->
+          <value>hadoop-hadoop-yarn-rm-0.hadoop-hadoop-yarn-rm.{{ .Release.Namespace }}.svc.cloud.uat:10020</value>
+        </property>
+        <property>
+          <name>mapreduce.jobhistory.webapp.address</name>
+          <!-- value>$HADOOP_CHART-yarn-rm-0.$HADOOP_CHART-yarn-rm.{{ .Release.Namespace }}.svc.cloud.uat:19888</value -->
+          <value>hadoop-hadoop-yarn-rm-0.hadoop-hadoop-yarn-rm.{{ .Release.Namespace }}.svc.cloud.uat:19888</value>
+        </property>
+      </configuration>
+
+    httpfs-site.xml: |
+      <?xml version="1.0" encoding="UTF-8"?>
+      <?xml-stylesheet type="text/xsl" href="configuration.xsl"?>
+      <configuration>
+        <property>
+          <name>httpfs.proxyuser.hue.hosts</name>
+          <value>*</value>
+        </property>
+        <property>
+          <name>httpfs.proxyuser.hue.groups</name>
+          <value>*</value>
+        </property>
+        <property>
+          <name>httpfs.proxyuser.hduser.hosts</name>
+          <value>*</value>
+        </property>
+        <property>
+          <name>httpfs.proxyuser.hduser.groups</name>
+          <value>*</value>
+        </property>
+      </configuration>
+
+    slaves: |
+      hadoop-hadoop-hdfs-nn-0.hadoop-hadoop-hdfs-nn.default.svc.cloud.uat
+      hadoop-hadoop-hdfs-dn-0.hadoop-hadoop-hdfs-dn.default.svc.cloud.uat
+
+    start-yarn-nm.sh: |
+      #!/usr/bin/env bash
+      [[ "TRACE" ]] && set -x
+      # Licensed to the Apache Software Foundation (ASF) under one or more
+      # contributor license agreements.  See the NOTICE file distributed with
+      # this work for additional information regarding copyright ownership.
+      # The ASF licenses this file to You under the Apache License, Version 2.0
+      # (the "License"); you may not use this file except in compliance with
+      # the License.  You may obtain a copy of the License at
+      #
+      #     http://www.apache.org/licenses/LICENSE-2.0
+      #
+      # Unless required by applicable law or agreed to in writing, software
+      # distributed under the License is distributed on an "AS IS" BASIS,
+      # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+      # See the License for the specific language governing permissions and
+      # limitations under the License.
+
+
+      # Start all yarn daemons.  Run this on master node.
+
+      echo "starting yarn daemons"
+
+      bin=`dirname "${BASH_SOURCE-$0}"`
+      bin=`cd "$bin"; pwd`
+
+      HADOOP_DEFAULT_LIBEXEC_DIR="$bin"/../libexec
+      HADOOP_LIBEXEC_DIR=${HADOOP_LIBEXEC_DIR:-$HADOOP_DEFAULT_LIBEXEC_DIR}
+      . $HADOOP_LIBEXEC_DIR/yarn-config.sh
+
+      # start resourceManager
+      # "$bin"/yarn-daemon.sh --config $HADOOP_CONF_DIR  start resourcemanager
+      # start nodeManager
+      "$bin"/yarn-daemon.sh --config $HADOOP_CONF_DIR  start nodemanager
+      # start proxyserver
+      #"$bin"/yarn-daemon.sh --config $HADOOP_CONF_DIR  start proxyserver
+
+    start-yarn-rm.sh: |
+      #!/usr/bin/env bash
+
+      # Licensed to the Apache Software Foundation (ASF) under one or more
+      # contributor license agreements.  See the NOTICE file distributed with
+      # this work for additional information regarding copyright ownership.
+      # The ASF licenses this file to You under the Apache License, Version 2.0
+      # (the "License"); you may not use this file except in compliance with
+      # the License.  You may obtain a copy of the License at
+      #
+      #     http://www.apache.org/licenses/LICENSE-2.0
+      #
+      # Unless required by applicable law or agreed to in writing, software
+      # distributed under the License is distributed on an "AS IS" BASIS,
+      # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+      # See the License for the specific language governing permissions and
+      # limitations under the License.
+
+
+      # Start all yarn daemons.  Run this on master node.
+
+      echo "starting yarn daemons"
+
+      bin=`dirname "${BASH_SOURCE-$0}"`
+      bin=`cd "$bin"; pwd`
+
+      HADOOP_DEFAULT_LIBEXEC_DIR="$bin"/../libexec
+      HADOOP_LIBEXEC_DIR=${HADOOP_LIBEXEC_DIR:-$HADOOP_DEFAULT_LIBEXEC_DIR}
+      . $HADOOP_LIBEXEC_DIR/yarn-config.sh
+
+      # start resourceManager
+      "$bin"/yarn-daemon.sh --config $HADOOP_CONF_DIR  start resourcemanager
+      # start nodeManager
+      # "$bin"/yarn-daemons.sh --config $HADOOP_CONF_DIR  start nodemanager
+      # start proxyserver
+      "$bin"/yarn-daemon.sh --config $HADOOP_CONF_DIR  start proxyserver
+
+    yarn-site.xml: |
+      <?xml version="1.0"?>
+      <?xml-stylesheet type="text/xsl" href="configuration.xsl"?>
+
+      <configuration>
+        <property>
+          <name>yarn.resourcemanager.hostname</name>
+          <!-- value>$HADOOP_CHART-yarn-rm</value -->
+          <value>hadoop-hadoop-yarn-rm</value>
+        </property>
+
+        <!-- Bind to all interfaces -->
+        <property>
+          <name>yarn.resourcemanager.bind-host</name>
+          <value>0.0.0.0</value>
+        </property>
+        <property>
+          <name>yarn.nodemanager.bind-host</name>
+          <value>0.0.0.0</value>
+        </property>
+        <property>
+          <name>yarn.timeline-service.bind-host</name>
+          <value>0.0.0.0</value>
+        </property>
+        <!-- /Bind to all interfaces -->
+
+        <property>
+          <name>yarn.nodemanager.vmem-check-enabled</name>
+          <value>false</value>
+        </property>
+
+        <property>
+          <name>yarn.nodemanager.aux-services</name>
+          <value>mapreduce_shuffle</value>
+        </property>
+
+        <property>
+          <name>yarn.nodemanager.aux-services.mapreduce_shuffle.class</name>
+          <value>org.apache.hadoop.mapred.ShuffleHandler</value>
+        </property>
+
+        <property>
+          <description>List of directories to store localized files in.</description>
+          <name>yarn.nodemanager.local-dirs</name>
+          <value>/var/lib/hadoop-yarn/cache/${user.name}/nm-local-dir</value>
+        </property>
+
+        <property>
+          <description>Where to store container logs.</description>
+          <name>yarn.nodemanager.log-dirs</name>
+          <value>/var/log/hadoop-yarn/containers</value>
+        </property>
+
+        <property>
+          <description>Where to aggregate logs to.</description>
+          <name>yarn.nodemanager.remote-app-log-dir</name>
+          <value>/var/log/hadoop-yarn/apps</value>
+        </property>
+        <property>
+          <name>yarn.app.mapreduce.am.job.client.port-range</name>
+          <value>56000-56002</value>
+        </property>
+        <property>
+          <name>yarn.app.mapreduce.am.command-opts</name>
+          <value>-Xmx819m</value>
+        </property>
+        <property>
+          <name>yarn.application.classpath</name>
+          <value>
+            /usr/local/hadoop/etc/hadoop,
+            /usr/local/hadoop/share/hadoop/common/*,
+            /usr/local/hadoop/share/hadoop/common/lib/*,
+            /usr/local/hadoop/share/hadoop/hdfs/*,
+            /usr/local/hadoop/share/hadoop/hdfs/lib/*,
+            /usr/local/hadoop/share/hadoop/mapreduce/*,
+            /usr/local/hadoop/share/hadoop/mapreduce/lib/*,
+            /usr/local/hadoop/share/hadoop/yarn/*,
+            /usr/local/hadoop/share/hadoop/yarn/lib/*
+          </value>
+        </property>
+      </configuration>
+
+    spark-defaults.conf: |
+      #spark.yarn.historyServer.address spark.cloud.com:18080
+      #spark.history.ui.port 18080
+      #spark.eventLog.dir hdfs:///spark-history
+      #spark.eventLog.enabled true
+      #spark.history.fs.logDirectory hdfs:///spark-history
+      spark.hadoop.yarn.resourcemanager.hostname            hadoop-hadoop-yarn-rm-0.hadoop-hadoop-yarn-rm.default.svc.cloud.uat
+      spark.hadoop.yarn.resourcemanager.address             hadoop-hadoop-yarn-rm-0.hadoop-hadoop-yarn-rm.default.svc.cloud.uat:8032

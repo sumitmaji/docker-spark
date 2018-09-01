@@ -1,0 +1,94 @@
+apiVersion: apps/v1beta1
+kind: StatefulSet
+metadata:
+  name: {{ template "spark.fullname" . }}-client
+  annotations:
+    checksum/config: {{ include (print $.Template.BasePath "/spark-configmap.yaml") . | sha256sum }}
+  labels:
+    app: {{ template "spark.name" . }}
+    chart: {{ .Chart.Name }}-{{ .Chart.Version | replace "+" "_" }}
+    release: {{ .Release.Name }}
+    heritage: {{ .Release.Service }}
+    component: client
+spec:
+  serviceName: {{ template "spark.fullname" . }}-client
+  replicas: {{ .Values.hdfs.sparkNode.replicas }}
+  template:
+    metadata:
+      labels:
+        app: {{ template "spark.name" . }}
+        release: {{ .Release.Name }}
+        component: client
+    spec:
+      affinity:
+        podAntiAffinity:
+        {{- if eq .Values.antiAffinity "hard" }}
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - topologyKey: "kubernetes.io/hostname"
+            labelSelector:
+              matchLabels:
+                app:  {{ template "spark.name" . }}
+                release: {{ .Release.Name | quote }}
+                component: client
+        {{- else if eq .Values.antiAffinity "soft" }}
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 5
+            podAffinityTerm:
+              topologyKey: "kubernetes.io/hostname"
+              labelSelector:
+                matchLabels:
+                  app:  {{ template "spark.name" . }}
+                  release: {{ .Release.Name | quote }}
+                  component: client
+        {{- end }}
+      terminationGracePeriodSeconds: 0
+      containers:
+      - name: client
+        image: {{ .Values.image }}
+        imagePullPolicy: {{ .Values.imagePullPolicy }}
+        command:
+           - "/bin/bash"
+           - "/tmp/spark-config/bootstrap.sh"
+           - "-d"
+        env:
+        - name: LDAP_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: ldapsecret
+              key: password
+        - name: KERB_ADMIN_PASS
+          valueFrom:
+            secretKeyRef:
+              name: krbsecret
+              key: password
+
+        resources:
+{{ toYaml .Values.hdfs.sparkNode.resources | indent 10 }}
+#        readinessProbe:
+#          httpGet:
+#            path: /
+#            port: 1006
+#          initialDelaySeconds: 5
+#          timeoutSeconds: 3
+#        livenessProbe:
+#          httpGet:
+#            path: /
+#            port: 1006
+#          initialDelaySeconds: 60
+#          timeoutSeconds: 3
+        volumeMounts:
+        - name: spark-config
+          mountPath: /tmp/spark-config
+        - name: dfs
+          mountPath: /root/hdfs/sparknode
+      volumes:
+      - name: spark-config
+        configMap:
+          name: {{ template "spark.fullname" . }}
+      - name: dfs
+      {{- if .Values.persistence.sparkNode.enabled }}
+        persistentVolumeClaim:
+          claimName: {{ template "spark.fullname" . }}-client
+      {{- else }}
+        emptyDir: {}
+      {{- end }}

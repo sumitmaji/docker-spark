@@ -15,17 +15,17 @@ WORKDIR /usr/local/
 ARG REPOSITORY_HOST
 
 #Install Scala, Spark & livy
-RUN wget "$REPOSITORY_HOST"/repo/scala-2.11.8.tgz &&\
+RUN wget "$REPOSITORY_HOST"/scala-2.11.8.tgz &&\
 tar -xzvf /usr/local/scala-2.11.8.tgz &&\
 mv /usr/local/scala-2.11.8 /usr/local/scala &&\
 rm -rf /usr/local/scala-2.11.8.tgz &&\
 chown -R root:hadoop /usr/local/scala &&\
-wget "$REPOSITORY_HOST"/repo/spark-2.2.0-bin-hadoop2.7.tgz &&\
+wget "$REPOSITORY_HOST"/spark-2.2.0-bin-hadoop2.7.tgz &&\
 tar -xzvf /usr/local/spark-2.2.0-bin-hadoop2.7.tgz &&\
 mv /usr/local/spark-2.2.0-bin-hadoop2.7 /usr/local/spark &&\
 rm -rf /usr/local/spark-2.2.0-bin-hadoop2.7.tgz &&\
 chown -R root:hadoop /usr/local/spark &&\
-wget "$REPOSITORY_HOST"/repo/livy-spark-2.0.0.tar.gz &&\
+wget "$REPOSITORY_HOST"/livy-spark-2.0.0.tar.gz &&\
 tar -xzvf /usr/local/livy-spark-2.0.0.tar.gz &&\
 rm -rf /usr/local/livy-spark-2.0.0.tar.gz &&\
 chown -R root:hadoop /usr/local/livy
@@ -46,8 +46,8 @@ RUN mkdir -p /utility/spark
 ADD utility/bootstrap.sh /utility/spark/bootstrap.sh
 RUN chmod +x /utility/spark/bootstrap.sh
 RUN chown root:root /utility/spark/bootstrap.sh
-
+RUN chown -R root:hadoop /usr/local/spark
+RUN mkdir -p /tmp/spark-config
 #Expose livy server port
 EXPOSE 8998
 ENTRYPOINT ["/utility/spark/bootstrap.sh"]
-

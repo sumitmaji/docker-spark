@@ -1,0 +1,27 @@
+# A headless service to create DNS records
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ template "spark.fullname" . }}-client
+  labels:
+    app: {{ template "spark.name" . }}
+    chart: {{ .Chart.Name }}-{{ .Chart.Version | replace "+" "_" }}
+    release: {{ .Release.Name }}
+    heritage: {{ .Release.Service }}
+    component: client
+spec:
+  ports:
+  - name: dfs
+    port: 9000
+    protocol: TCP
+  - name: webhdfs
+    port: 50075
+  - name: hdfs1
+    port: 1006
+  - name: hdfs2
+    port: 1019
+  clusterIP: None
+  selector:
+    app: {{ template "spark.name" . }}
+    release: {{ .Release.Name }}
+    component: client
