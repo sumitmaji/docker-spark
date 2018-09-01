@@ -62,13 +62,17 @@ spec:
               mountPath: /zeppelin/notebook
           {{- end }}
       volumes:
-        {{- if .Values.Zeppelin.Persistence.Config }}
         - name: {{ template "master-fullname" . }}-config
+        {{- if .Values.Zeppelin.Persistence.Config.Enabled }}
           persistentVolumeClaim:
             claimName: {{ template "zeppelin-fullname" . }}-config
+        {{- else }}
+          emptyDir: {}
         {{- end }}
-        {{- if .Values.Zeppelin.Persistence.Notebook }}
         - name: {{ template "master-fullname" . }}-notebook
+        {{- if .Values.Zeppelin.Persistence.Notebook.Enabled }}
           persistentVolumeClaim:
             claimName: {{ template "zeppelin-fullname" . }}-notebook
+        {{- else }}
+          emptyDir: {}
         {{- end }}
