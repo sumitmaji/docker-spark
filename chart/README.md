@@ -112,5 +112,5 @@ $ helm install --name my-release -f values.yaml stable/spark
 
 
 ```bash
-$ ./bin/spark-submit --class org.apache.spark.examples.SparkPi     --master yarn     --num-executors 1     --driver-memory 512m     --executor-memory 512m     --executor-cores 1     examples/jars/spark-examples*.jar 10
+$ kubectl exec -it  spark-spark-client-0 -- /usr/local/spark/bin/spark-submit --class org.apache.spark.examples.SparkPi     --master yarn     --num-executors 1     --driver-memory 512m     --executor-memory 512m     --executor-cores 1     /usr/local/spark/examples/jars/spark-examples_2.11-2.2.0.jar 10
 ```
